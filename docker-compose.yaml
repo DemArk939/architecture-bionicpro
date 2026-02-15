@@ -31,7 +31,7 @@ services:
       KC_HOSTNAME_STRICT_HTTPS: "false"
       KC_HTTP_ENABLED: "true"
       KC_PROXY: "none"
-    command: 
+    command:
       - start-dev
       - --import-realm
     volumes:
@@ -39,7 +39,18 @@ services:
     ports:
       - "8080:8080"
     depends_on:
-      - keycloak_db
+      keycloak_db:
+        condition: service_healthy
+
+  bionicpro-auth:
+    build:
+      context: bionicpro-auth
+      dockerfile: Dockerfile
+    ports:
+      - "8090:8090"
+    depends_on:
+      - keycloak
+
   frontend:
     build:
       context: ./frontend
@@ -47,19 +58,8 @@ services:
     ports:
       - "3000:3000"
     environment:
-      REACT_APP_API_URL: http://bionicpro-auth:8000
-      REACT_APP_KEYCLOAK_URL: http://keycloak:8080
+      REACT_APP_API_URL: http://localhost:8000
+      REACT_APP_AUTH_URL: http://localhost:8090
+      REACT_APP_KEYCLOAK_URL: http://localhost:8080
       REACT_APP_KEYCLOAK_REALM: reports-realm
       REACT_APP_KEYCLOAK_CLIENT_ID: reports-frontend
-
-  bionicpro-auth:
-    build:
-      context: ./bionicpro-auth
-      dockerfile: Dockerfile
-    ports:
-      - "8000:8000"
-    environment:
-      REACT_APP_API_URL: http://localhost:8000  # для фронта
-    depends_on:
-      - keycloak
-
