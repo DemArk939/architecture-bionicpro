@@ -18,6 +18,28 @@ services:
       retries: 10
       start_period: 30s
 
+  openldap:
+    image: osixia/openldap:latest
+    container_name: openldap
+    environment:
+      LDAP_ORGANISATION: "Example Inc."
+      LDAP_DOMAIN: "example.com"
+      LDAP_ADMIN_PASSWORD: "adminpassword"
+      LDAP_CONFIG_PASSWORD: "configpassword"
+      LDAP_READONLY_USER: "false"
+      LDAP_TLS: "false"
+      LDAP_REPLICATION: "false"
+      LDAP_REMOVE_CONFIG_AFTER_SETUP: "true"
+      LDAP_SEED_INTERNAL_LDIF_PATH: "/ldif"   # указываем кастомный путь для LDIF-файлов
+    volumes:
+      - ./ldap:/ldif                           # монтируем локальную папку с LDIF
+      - ldap_data:/var/lib/ldap
+      - ldap_config:/etc/ldap/slapd.d
+    ports:
+      - "389:389"
+      - "636:636"
+    restart: unless-stopped
+
   keycloak:
     image: quay.io/keycloak/keycloak:21.1
     environment:
@@ -41,6 +63,8 @@ services:
     depends_on:
       keycloak_db:
         condition: service_healthy
+      openldap:
+        condition: service_started
 
   bionicpro-auth:
     build:
@@ -63,3 +87,7 @@ services:
       REACT_APP_KEYCLOAK_URL: http://localhost:8080
       REACT_APP_KEYCLOAK_REALM: reports-realm
       REACT_APP_KEYCLOAK_CLIENT_ID: reports-frontend
+
+volumes:
+  ldap_data:
+  ldap_config:
