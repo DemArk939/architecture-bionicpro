@@ -141,4 +141,16 @@ docker compose up --build -d
 ![ldap1](Task1/ldap1.png)
 ![ldap2](Task1/ldap2.png)
 
+### Задача 5. Настройте MFA
 
+#### Добавляем настройку ОТП
+
+![otp1](Task1/otp1.png)
+
+#### Добавляем настройку ОТП для пользователя
+
+![otp2](Task1/otp2.png)
+
+#### Результат при входе
+
+![otp3](Task1/otp3.png)
