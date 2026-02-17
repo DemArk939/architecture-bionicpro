@@ -41,7 +41,8 @@ services:
     restart: unless-stopped
 
   keycloak:
-    image: quay.io/keycloak/keycloak:21.1
+    image: playaru/keycloak-russian:21.1.1
+    platform: linux/amd64
     environment:
       KEYCLOAK_ADMIN: admin
       KEYCLOAK_ADMIN_PASSWORD: admin
@@ -58,6 +59,7 @@ services:
       - --import-realm
     volumes:
       - ./keycloak/realm-export.json:/opt/keycloak/data/import/realm-export.json
+      - ./keycloak/providers:/opt/keycloak/providers
     ports:
       - "8080:8080"
     depends_on:

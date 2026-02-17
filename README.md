@@ -154,3 +154,40 @@ docker compose up --build -d
 #### Результат при входе
 
 ![otp3](Task1/otp3.png)
+
+### Задача 6. Добавьте OAuth 2.0 от Яндекс ID.
+
+#### Поменяем кейклок на российский и добавим необходимые библиотеки:
+```
+  keycloak:
+    image: playaru/keycloak-russian:21.1.1
+    platform: linux/amd64
+    ...
+    volumes:
+    ...
+      - ./keycloak/providers:/opt/keycloak/providers
+```
+
+#### Настроим яндекс ID
+
+![yandex](Task1/yandex.png)
+
+#### Настроим кейклок
+
+![yandex-k](Task1/yandex-k.png)
+
+#### Проверка входа
+
+![yandex1](Task1/yandex1.png)
+![yandex2](Task1/yandex2.png)
+
+#### Проверка появления пользователя в БД кейклока
+
+![yandex3](Task1/yandex3.png)
+
+#### Итоговый realm
+
+[realm-export.json](Task1/realm-export.json)
+
+
+
