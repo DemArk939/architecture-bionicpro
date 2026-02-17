@@ -189,5 +189,8 @@ docker compose up --build -d
 
 [realm-export.json](Task1/realm-export.json)
 
+## Задание 2. Разработка сервиса отчётов
 
+### Задача 1. Создать архитектуру решения для подготовки и получения отчётов.
 
+![BionicPRO_C4_model_to_be](Task2/BionicPRO_C4_model_to_be.jpg)
