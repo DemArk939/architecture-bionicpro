@@ -105,6 +105,13 @@
             <version>1.10.0</version> <!-- для удобной генерации CSV -->
         </dependency>
 
+        <dependency>
+            <groupId>com.clickhouse</groupId>
+            <artifactId>clickhouse-jdbc</artifactId>
+            <version>0.6.0</version>
+            <classifier>all</classifier>
+        </dependency>
+
     </dependencies>
 
     <build>

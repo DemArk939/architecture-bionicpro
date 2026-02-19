@@ -374,3 +374,185 @@ String fileUrl = minioService.getPublicUrl(objectName);
 Получение на UI ссылки на nginx и название файла:
 
 ![report](Task3/report.png)
+
+## Задание 4. Повышение оперативности и стабильности работы CRM
+
+Добавим сервисы: Zookeeper, Kafka, Debezium Connect, Clickhouse.
+
+Настройка Debezium коннектора для таблицы customers
+
+```shell
+curl -X POST -H "Content-Type: application/json" --data @Task4/debezium-postgres-connector.json http://localhost:8083/connectors
+```
+
+Настройка Clickhouse для приёма данных из Kafka
+
+Создание таблиц
+
+```shell
+docker-compose exec clickhouse clickhouse-client
+```
+```sql
+CREATE TABLE customers_queue (
+    id UInt32,
+    name String,
+    email String,
+    age Nullable(Int32),
+    gender Nullable(String),
+    country Nullable(String),
+    address Nullable(String),
+    phone Nullable(String),
+    _timestamp DateTime   -- время события из Kafka
+) ENGINE = Kafka()
+SETTINGS
+    kafka_broker_list = 'kafka:9092',
+    kafka_topic_list = 'postgres.public.customers',
+    kafka_group_name = 'clickhouse_consumers',
+    kafka_format = 'JSONEachRow',
+    kafka_row_delimiter = '\n',
+    kafka_skip_broken_messages = 1;
+```
+
+Создание таблицы для хранения данных с обработкой обновлений
+```sql
+CREATE TABLE customers (
+                           id UInt32,
+                           name String,
+                           email String,
+                           age Nullable(Int32),
+                           gender Nullable(String),
+                           country Nullable(String),
+                           address Nullable(String),
+                           phone Nullable(String),
+                           version DateTime   -- время события
+) ENGINE = ReplacingMergeTree(version)
+ORDER BY id;
+```
+
+Материализованное представление для переноса данных из очереди
+```sql
+CREATE MATERIALIZED VIEW customers_mv TO customers AS
+SELECT
+    id,
+    name,
+    email,
+    age,
+    gender,
+    country,
+    address,
+    phone,
+    _timestamp AS version
+FROM customers_queue;
+```
+
+```sql
+CREATE TABLE emg_sensor_data (
+                                 user_id UInt32,
+                                 prosthesis_type String,
+                                 muscle_group String,
+                                 signal_frequency UInt32,
+                                 signal_duration UInt32,
+                                 signal_amplitude Float32,
+                                 signal_time DateTime
+) ENGINE = MergeTree()
+ORDER BY (user_id, signal_time);
+```
+
+Создание витрины для отчётности в Clickhouse
+
+```sql
+-- Таблица для хранения агрегированных данных (можно использовать AggregatingMergeTree или обычную)
+CREATE TABLE customer_telemetry_summary_clickhouse (
+                                                       user_id UInt32,
+                                                       name String,
+                                                       email String,
+                                                       age Nullable(Int32),
+                                                       gender Nullable(String),
+                                                       country Nullable(String),
+                                                       prosthesis_types Array(String),
+                                                       total_signals UInt32,
+                                                       avg_signal_frequency Float32,
+                                                       avg_signal_duration Float32,
+                                                       avg_signal_amplitude Float32,
+                                                       min_signal_time DateTime,
+                                                       max_signal_time DateTime,
+                                                       last_signal_time DateTime
+) ENGINE = ReplacingMergeTree()
+ORDER BY user_id;
+```
+```sql
+CREATE VIEW customer_telemetry_summary_view AS
+SELECT
+    c.id AS user_id,
+    c.name,
+    c.email,
+    c.age,
+    c.gender,
+    c.country,
+    groupArray(e.prosthesis_type) AS prosthesis_types,
+    count() AS total_signals,
+    avg(e.signal_frequency) AS avg_signal_frequency,
+    avg(e.signal_duration) AS avg_signal_duration,
+    avg(e.signal_amplitude) AS avg_signal_amplitude,
+    min(e.signal_time) AS min_signal_time,
+    max(e.signal_time) AS max_signal_time,
+    max(e.signal_time) AS last_signal_time
+FROM customers AS c
+         LEFT JOIN emg_sensor_data AS e ON c.id = e.user_id
+GROUP BY
+    c.id,
+    c.name,
+    c.email,
+    c.age,
+    c.gender,
+    c.country;
+```
+
+Модификация кода для подключения к Clickhouse
+
+```java
+        // Получаем версию (max_signal_time) из Clickhouse
+        String versionSql = "SELECT max(max_signal_time) as version FROM customer_telemetry_summary_view WHERE email = ?";
+        List<Map<String, Object>> versionResult = clickhouseService.query(versionSql, email);
+        if (versionResult.isEmpty() || versionResult.get(0).get("version") == null) {
+            throw new RuntimeException("No data found for user");
+        }
+        long version = ((java.sql.Timestamp) versionResult.get(0).get("version")).getTime();
+
+        String objectName = String.format("reports/%s/report_%d.csv", email, version);
+
+        if (!minioService.objectExists(objectName)) {
+            // Получаем полные данные для отчёта
+            String fullSql = "SELECT * FROM customer_telemetry_summary_view WHERE email = ?";
+            List<Map<String, Object>> dataList = clickhouseService.query(fullSql, email);
+            if (dataList.isEmpty()) {
+                throw new RuntimeException("No data found for user");
+            }
+            Map<String, Object> data = dataList.get(0);
+
+            byte[] csvData = generateCsv(data); // метод generateCsv нужно адаптировать под структуру данных из Clickhouse
+            minioService.uploadFile(objectName, csvData, "text/csv");
+            log.info("Generated new report for {}: {}", email, objectName);
+        }
+```
+Дать права для пользователя в кликхаус:
+
+```
+GRANT ALL ON default.emg_sensor_data TO reporter;
+GRANT ALL ON default.customers TO reporter;
+GRANT ALL ON default.customer_telemetry_summary_view TO reporter;
+GRANT ALL ON default.* TO reporter;
+```
+Доработаем Dag для загразки данных в кликхаус [dag_sample](Task2/dags/dag_sample.py)
+
+Итог
+
+- Debezium отслеживает изменения в customers и отправляет в Kafka.
+- Clickhouse через KafkaEngine потребляет эти изменения и хранит их в таблице customers с обработкой обновлений.
+- Airflow DAG дополнен загрузкой телеметрии напрямую в Clickhouse.
+- В Clickhouse создано представление customer_telemetry_summary_view, объединяющее клиентов и телеметрию.
+- API переведено на чтение из Clickhouse и сохраняет логику генерации отчётов в Minio.
+
+Результат на UI:
+
+![result](Task4/result.png)

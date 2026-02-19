@@ -1,5 +1,6 @@
 package com.example.bionicproauth.controller;
 
+import com.example.bionicproauth.service.ClickhouseService;
 import com.example.bionicproauth.service.MinioService;
 import jakarta.servlet.http.HttpSession;
 import lombok.extern.slf4j.Slf4j;
@@ -14,6 +15,7 @@ import java.io.StringWriter;
 import java.sql.Array;
 import java.sql.Timestamp;
 import java.util.Arrays;
+import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
 
@@ -22,11 +24,11 @@ import java.util.stream.Collectors;
 @RequestMapping("/api")
 public class ReportController {
 
-    private final JdbcTemplate jdbcTemplate;
+    private final ClickhouseService clickhouseService;
     private final MinioService minioService;
 
-    public ReportController(JdbcTemplate jdbcTemplate, MinioService minioService) {
-        this.jdbcTemplate = jdbcTemplate;
+    public ReportController(ClickhouseService clickhouseService, MinioService minioService) {
+        this.clickhouseService = clickhouseService;
         this.minioService = minioService;
     }
 
@@ -37,34 +39,33 @@ public class ReportController {
             throw new RuntimeException("User email not found in session");
         }
 
-        // 1. Получаем только дату последнего сигнала для версионирования
-        String versionSql = "SELECT max_signal_time FROM customer_telemetry_summary WHERE email = ?";
-        Timestamp maxSignalTime;
-        try {
-            maxSignalTime = jdbcTemplate.queryForObject(versionSql, Timestamp.class, email);
-        } catch (Exception e) {
-            throw new RuntimeException("No data found for user", e);
+// Получаем версию как Unix timestamp (секунды)
+        String versionSql = "SELECT toUnixTimestamp(max_signal_time) as version FROM customer_telemetry_summary_view WHERE email = ?";
+        List<Map<String, Object>> versionResult = clickhouseService.query(versionSql, email);
+        if (versionResult.isEmpty() || versionResult.get(0).get("version") == null) {
+            throw new RuntimeException("No data found for user");
         }
+// Версия в секундах, умножаем на 1000 для миллисекунд
+        long version = ((Number) versionResult.get(0).get("version")).longValue() * 1000;
 
-        long version = maxSignalTime != null ? maxSignalTime.getTime() : System.currentTimeMillis();
         String objectName = String.format("reports/%s/report_%d.csv", email, version);
 
-        // 2. Проверяем наличие в Minio
         if (!minioService.objectExists(objectName)) {
-            // Файла нет – генерируем, запросив полные данные
-            Map<String, Object> fullData = fetchFullData(email);
-            byte[] csvData = generateCsv(fullData);
+            // Получаем полные данные для отчёта
+            String fullSql = "SELECT * FROM customer_telemetry_summary_view WHERE email = ?";
+            List<Map<String, Object>> dataList = clickhouseService.query(fullSql, email);
+            if (dataList.isEmpty()) {
+                throw new RuntimeException("No data found for user");
+            }
+            Map<String, Object> data = dataList.get(0);
+
+            byte[] csvData = generateCsv(data); // метод generateCsv нужно адаптировать под структуру данных из Clickhouse
             minioService.uploadFile(objectName, csvData, "text/csv");
             log.info("Generated new report for {}: {}", email, objectName);
         }
 
         String fileUrl = minioService.getPublicUrl(objectName);
         return Map.of("url", fileUrl);
-    }
-
-    private Map<String, Object> fetchFullData(String email) {
-        String sql = "SELECT * FROM customer_telemetry_summary WHERE email = ?";
-        return jdbcTemplate.queryForMap(sql, email);
     }
 
     private byte[] generateCsv(Map<String, Object> data) {
@@ -76,11 +77,15 @@ public class ReportController {
                     "max_signal_time", "last_signal_time"
             ));
 
-            String prosthesisTypes = "";
-            Array typesArray = (Array) data.get("prosthesis_types");
-            if (typesArray != null) {
-                String[] types = (String[]) typesArray.getArray();
-                prosthesisTypes = Arrays.stream(types).collect(Collectors.joining(";"));
+            String prosthesisTypesStr = "";
+            Object prosthesisObj = data.get("prosthesis_types");
+            if (prosthesisObj != null) {
+                if (prosthesisObj instanceof java.sql.Array) {
+                    String[] types = (String[]) ((java.sql.Array) prosthesisObj).getArray();
+                    prosthesisTypesStr = String.join(";", types);
+                } else {
+                    prosthesisTypesStr = prosthesisObj.toString();
+                }
             }
 
             printer.printRecord(
@@ -90,7 +95,7 @@ public class ReportController {
                     data.get("age"),
                     data.get("gender"),
                     data.get("country"),
-                    prosthesisTypes,
+                    prosthesisTypesStr,
                     data.get("total_signals"),
                     data.get("avg_signal_frequency"),
                     data.get("avg_signal_duration"),

@@ -45,6 +45,14 @@ public class TokenAuthenticationFilter extends OncePerRequestFilter {
             String encryptedRefreshToken = (String) session.getAttribute("refreshToken");
             String accessToken = (String) session.getAttribute("accessToken");
             Long expiresAt = (Long) session.getAttribute("expiresAt");
+            if (expiresAt == null) {
+                // Если expiresAt отсутствует, считаем сессию недействительной и очищаем контекст
+                log.warn("expiresAt not found in session, invalidating session for {}", session.getId());
+                session.invalidate();
+                SecurityContextHolder.clearContext();
+                chain.doFilter(request, response);
+                return;
+            }
 
             log.info("Токен {}, время жизни {}", session.getId(), new Date(expiresAt));
 
