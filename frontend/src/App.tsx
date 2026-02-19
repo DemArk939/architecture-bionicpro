@@ -1,24 +1,17 @@
 import React from 'react';
-import { ReactKeycloakProvider } from '@react-keycloak/web';
-import Keycloak, { KeycloakConfig } from 'keycloak-js';
+import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import ReportPage from './components/ReportPage';
-
-const keycloakConfig: KeycloakConfig = {
-  url: process.env.REACT_APP_KEYCLOAK_URL,
-  realm: process.env.REACT_APP_KEYCLOAK_REALM||"",
-  clientId: process.env.REACT_APP_KEYCLOAK_CLIENT_ID||""
-};
-
-const keycloak = new Keycloak(keycloakConfig);
+import Callback from './components/Callback';
 
 const App: React.FC = () => {
-  return (
-    <ReactKeycloakProvider authClient={keycloak}>
-      <div className="App">
-        <ReportPage />
-      </div>
-    </ReactKeycloakProvider>
-  );
+    return (
+        <BrowserRouter>
+            <Routes>
+                <Route path="/" element={<ReportPage />} />
+                <Route path="/callback" element={<Callback />} />
+            </Routes>
+        </BrowserRouter>
+    );
 };
 
 export default App;
