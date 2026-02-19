@@ -319,3 +319,58 @@ public ResponseEntity<?> getReport(HttpSession session) {
 Для простоты изменил в KeyClock email существующего пользователя user1 на alex.hebert@example.com, чтобы получить существующий в БД отчет.
 
 ![report](Task2/report.png)
+
+## Задание 3. Снижение нагрузки на базу данных
+
+Добавляем в docker-compose.yaml minio и nginx
+
+```
+  minio:
+    image: minio/minio
+....
+
+  nginx:
+    image: nginx:alpine
+```
+
+Конфигурацию для nginx положим в [nginx](Task3/nginx/nginx.conf)
+
+Доработаем приложение, метод получения отчета:
+
+```java
+        // 1. Получаем только дату последнего сигнала для версионирования
+String versionSql = "SELECT max_signal_time FROM customer_telemetry_summary WHERE email = ?";
+Timestamp maxSignalTime;
+maxSignalTime = jdbcTemplate.queryForObject(versionSql, Timestamp.class, email);
+
+long version = maxSignalTime != null ? maxSignalTime.getTime() : System.currentTimeMillis();
+String objectName = String.format("reports/%s/report_%d.csv", email, version);
+
+// 2. Проверяем наличие в Minio
+if (!minioService.objectExists(objectName)) {
+// Файла нет – генерируем, запросив полные данные
+Map<String, Object> fullData = fetchFullData(email);
+byte[] csvData = generateCsv(fullData);
+            minioService.uploadFile(objectName, csvData, "text/csv");
+            log.info("Generated new report for {}: {}", email, objectName);
+        }
+
+String fileUrl = minioService.getPublicUrl(objectName);
+        return Map.of("url", fileUrl);
+```
+
+Пояснение:
+
+- Лёгкий запрос к БД – получаем только max_signal_time, чтобы определить версию. Это быстро и не нагружает базу.
+- Проверка Minio – если файл с версией уже существует, сразу возвращаем ссылку. БД больше не трогается.
+- Генерация при необходимости – если файла нет, запрашиваем полные данные из БД, генерируем CSV, загружаем в Minio.
+- Актуальность – версия привязана к max_signal_time. Если данные обновятся (новые сигналы), max_signal_time изменится,
+и будет сгенерирован новый файл. Старый останется, но запросы будут идти к новому.
+
+Сгенерированный отчет в mino:
+
+![report](Task3/mino.png)
+
+Получение на UI ссылки на nginx и название файла:
+
+![report](Task3/report.png)
