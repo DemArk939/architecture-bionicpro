@@ -5,6 +5,7 @@ import com.example.bionicproauth.model.LoginRequest;
 import com.example.bionicproauth.model.TokenResponse;
 import com.example.bionicproauth.service.KeycloakService;
 import com.example.bionicproauth.service.TokenEncryptionService;
+import com.example.bionicproauth.util.JwtUtils;
 import com.example.bionicproauth.util.SecurityContextUtils;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpSession;
@@ -23,25 +24,24 @@ public class AuthController {
     private final KeycloakService keycloakService;
     private final TokenEncryptionService encryptionService;
     private final String clientId;
+    private final JwtUtils jwtUtils;
 
     public AuthController(KeycloakService keycloakService,
                           TokenEncryptionService encryptionService,
-                          @Value("${keycloak.client-id}") String clientId) {
+                          @Value("${keycloak.client-id}") String clientId,
+                          JwtUtils jwtUtils) {
         this.keycloakService = keycloakService;
         this.encryptionService = encryptionService;
         this.clientId = clientId;
+        this.jwtUtils = jwtUtils;
     }
 
     @PostMapping("/login")
     public ResponseEntity<?> login(@RequestBody LoginRequest loginRequest, HttpServletRequest request) {
         try {
             TokenResponse tokens = keycloakService.getTokens(loginRequest.getUsername(), loginRequest.getPassword(), clientId);
-            log.info("Для пользователя {} получен токен {}, RefreshToken {}",
-                    loginRequest.getUsername(),
-                    tokens.getAccessToken(),
-                    tokens.getRefreshToken());
             HttpSession session = request.getSession(true);
-            request.changeSessionId(); // ротация session id
+            request.changeSessionId();
 
             String encryptedRefresh = encryptionService.encrypt(tokens.getRefreshToken());
 
@@ -50,6 +50,10 @@ public class AuthController {
             session.setAttribute("refreshToken", encryptedRefresh);
             long expiresAt = Instant.now().plusSeconds(tokens.getExpiresIn()).toEpochMilli();
             session.setAttribute("expiresAt", expiresAt);
+
+            // Извлекаем email из access token
+            String email = jwtUtils.extractEmail(tokens.getAccessToken());
+            session.setAttribute("email", email);
 
             var auth = SecurityContextUtils.createAuthentication(loginRequest.getUsername(), tokens);
             SecurityContextHolder.getContext().setAuthentication(auth);

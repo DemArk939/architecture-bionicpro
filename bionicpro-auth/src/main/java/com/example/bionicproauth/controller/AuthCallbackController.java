@@ -3,6 +3,7 @@ package com.example.bionicproauth.controller;
 import com.example.bionicproauth.model.TokenResponse;
 import com.example.bionicproauth.service.KeycloakService;
 import com.example.bionicproauth.service.TokenEncryptionService;
+import com.example.bionicproauth.util.JwtUtils;
 import com.example.bionicproauth.util.SecurityContextUtils;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpSession;
@@ -25,15 +26,17 @@ public class AuthCallbackController {
     private final TokenEncryptionService encryptionService;
     private final String clientId;
     private final String redirectUri;
+    private final JwtUtils jwtUtils;
 
     public AuthCallbackController(KeycloakService keycloakService,
                                   TokenEncryptionService encryptionService,
                                   @Value("${keycloak.client-id}") String clientId,
-                                  @Value("${app.redirect-uri}") String redirectUri) {
+                                  @Value("${app.redirect-uri}") String redirectUri, JwtUtils jwtUtils) {
         this.keycloakService = keycloakService;
         this.encryptionService = encryptionService;
         this.clientId = clientId;
         this.redirectUri = redirectUri;
+        this.jwtUtils = jwtUtils;
     }
 
     @PostMapping("/auth/callback")
@@ -50,15 +53,18 @@ public class AuthCallbackController {
             TokenResponse tokens = keycloakService.exchangeCodeForTokens(code, codeVerifier, clientId, redirectUri);
 
             HttpSession session = request.getSession(true);
-            request.changeSessionId(); // ротация session id
+            request.changeSessionId();
 
             String encryptedRefresh = encryptionService.encrypt(tokens.getRefreshToken());
 
-            session.setAttribute("username", "user"); // можно извлечь из токена
+            session.setAttribute("username", "user"); // или извлечь из токена
             session.setAttribute("accessToken", tokens.getAccessToken());
             session.setAttribute("refreshToken", encryptedRefresh);
             long expiresAt = Instant.now().plusSeconds(tokens.getExpiresIn()).toEpochMilli();
             session.setAttribute("expiresAt", expiresAt);
+
+            String email = jwtUtils.extractEmail(tokens.getAccessToken());
+            session.setAttribute("email", email);
 
             var auth = SecurityContextUtils.createAuthentication("user", tokens);
             SecurityContextHolder.getContext().setAuthentication(auth);

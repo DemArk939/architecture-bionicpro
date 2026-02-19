@@ -194,3 +194,128 @@ docker compose up --build -d
 ### Задача 1. Создать архитектуру решения для подготовки и получения отчётов.
 
 ![BionicPRO_C4_model_to_be](Task2/BionicPRO_C4_model_to_be.jpg)
+
+### Задача 2. Разработать Airflow DAG и настроить его на запуск по расписанию.
+
+В docker-compose.yaml добавлены все необходимые сервисы для Airflow
+```
+x-airflow-common: &airflow-common
+  build:
+    context: ./Task2
+    dockerfile: Dockerfile
+    
+    .....
+    
+services:    
+  postgres:
+    image: postgres:16.0
+    volumes:
+    
+    .....
+    
+  airflow-webserver:
+    <<: *airflow-common
+
+    .....
+    
+  airflow-scheduler:
+    <<: *airflow-common
+    
+    .....
+    
+  airflow-triggerer:
+    <<: *airflow-common
+    
+    .....
+    
+  airflow-cli:
+    <<: *airflow-common
+    
+    .....  
+    
+  airflow-init:
+    <<: *airflow-common
+```
+
+В дериктории Task2 добавлены файлы для инициализиции БД и миграции данных, а также скрипт dag [dag_sample](Task2/dags/dag_sample.py)
+
+Переходим в Airflow по http://localhost:8081 и настраиваем коннектор для записи в БД:
+
+![Airflow1](Task2/Airflow1.png)
+
+Запускаем Процесс для миграции данных в БД, а также трансформацию и наполнение таблицы отчетов:
+
+![Airflow2](Task2/Airflow2.png)
+
+Структура таблицы отчетов:
+
+```
+            CREATE TABLE IF NOT EXISTS customer_telemetry_summary (
+                                                                      user_id INTEGER PRIMARY KEY,
+                                                                      name VARCHAR(100),
+                email VARCHAR(100),
+                age NUMERIC,
+                gender VARCHAR(10),
+                country VARCHAR(100),
+                prosthesis_types TEXT[],               -- список типов протезов
+                total_signals INTEGER,                  -- общее количество сигналов
+                avg_signal_frequency DECIMAL(10,2),    -- средняя частота
+                avg_signal_duration DECIMAL(10,2),      -- средняя длительность
+                avg_signal_amplitude DECIMAL(10,2),     -- средняя амплитуда
+                min_signal_time TIMESTAMP,              -- первый сигнал
+                max_signal_time TIMESTAMP,               -- последний сигнал
+                last_signal_time TIMESTAMP               -- дубль для удобства
+                );
+```
+
+### Задача 3. Создайте бэкенд-часть приложения для API.
+
+Для упрощения реализация получения отчета сделана в том же сервисе, через который идет авторизация.
+
+Доработан контроллер бек приложения для подключения к БД и выгрузке отчета пользователю:
+
+```java
+        String sql = """
+                SELECT user_id, name, email, age, gender, country,
+                       prosthesis_types, total_signals,
+                       avg_signal_frequency, avg_signal_duration, avg_signal_amplitude,
+                       min_signal_time, max_signal_time, last_signal_time
+                FROM customer_telemetry_summary
+                WHERE email = ?
+                """;
+
+            ReportDto report = jdbcTemplate.queryForObject(sql, new ReportRowMapper(), email);
+            return ResponseEntity.ok(report);
+```
+
+
+### Задача 4. Реализуйте ограничение доступа к эндпоинту отчётности.
+
+Для ограничения доступа, при получении jwt токена, сохраняем информацию о пользователе в сессии:
+
+```java
+
+// Извлекаем email из access token
+String email = jwtUtils.extractEmail(tokens.getAccessToken());
+            session.setAttribute("email", email);
+```
+
+Для получения отчета, получаем информацию о пользователе не из парамтеров запроса, а из данных сессии,
+таким образом, клиент не сможет получить отчеты других пользователей:
+
+```java
+    @GetMapping("/report")
+public ResponseEntity<?> getReport(HttpSession session) {
+    String email = (String) session.getAttribute("email");
+    if (email == null) {
+        return ResponseEntity.status(401).body("User email not found in session");
+    }
+```
+
+### Задача 5. Добавьте в UI кнопку получения отчёта и вызова эндпоинта его генерации.
+
+Доработан UI для загразки отчета.
+
+Для простоты изменил в KeyClock email существующего пользователя user1 на alex.hebert@example.com, чтобы получить существующий в БД отчет.
+
+![report](Task2/report.png)
